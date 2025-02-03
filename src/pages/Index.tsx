@@ -31,6 +31,42 @@ const Index = () => {
     return fullText;
   };
 
+  // Function to extract key terms from text
+  const extractKeyTerms = (text: string): string[] => {
+    // Convert to lowercase and remove special characters
+    const cleanText = text.toLowerCase().replace(/[^\w\s]/g, ' ');
+    
+    // Split into words and remove common words
+    const commonWords = new Set(['and', 'or', 'the', 'a', 'an', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by']);
+    const words = cleanText.split(/\s+/).filter(word => 
+      word.length > 2 && !commonWords.has(word)
+    );
+    
+    return Array.from(new Set(words)); // Remove duplicates
+  };
+
+  // Function to calculate similarity score
+  const calculateMatchScore = (resumeTerms: string[], jobTerms: string[]): number => {
+    console.log('Analyzing match between resume and job description...');
+    console.log('Resume terms:', resumeTerms);
+    console.log('Job terms:', jobTerms);
+    
+    // Count matching terms
+    const matchingTerms = resumeTerms.filter(term => jobTerms.includes(term));
+    console.log('Matching terms:', matchingTerms);
+    
+    // Calculate basic score based on matching terms
+    const matchRatio = matchingTerms.length / jobTerms.length;
+    
+    // Convert to percentage and ensure minimum score of 40%
+    const baseScore = Math.max(40, Math.min(100, Math.round(matchRatio * 100)));
+    
+    console.log('Match ratio:', matchRatio);
+    console.log('Final score:', baseScore);
+    
+    return baseScore;
+  };
+
   const analyzeMatch = async () => {
     if (!resume || !jobDescription) {
       toast({
@@ -51,9 +87,12 @@ const Index = () => {
       const jdResult = await mammoth.extractRawText({ arrayBuffer: jdBuffer });
       const jdText = jdResult.value;
 
-      // For demo purposes, calculate a random match score
-      // In a real app, you'd use NLP or AI to analyze the match
-      const score = Math.floor(Math.random() * 40) + 60;
+      // Extract key terms from both documents
+      const resumeTerms = extractKeyTerms(resumeText);
+      const jobTerms = extractKeyTerms(jdText);
+
+      // Calculate match score
+      const score = calculateMatchScore(resumeTerms, jobTerms);
       setMatchScore(score);
       
       console.log('Analysis complete:', {
