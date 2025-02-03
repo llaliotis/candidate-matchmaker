@@ -2,41 +2,13 @@ import React, { useState } from 'react';
 import { FileUpload } from '@/components/FileUpload';
 import { ScoreCard } from '@/components/ScoreCard';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/use-toast';
 import * as pdfjsLib from 'pdfjs-dist';
 import mammoth from 'mammoth';
-import stringSimilarity from 'string-similarity';
 
 // Initialize PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
-
-// Define skill categories with weights
-const skillCategories = {
-  technical: {
-    weight: 2.0,
-    keywords: new Set([
-      'python', 'javascript', 'typescript', 'java', 'c++', 'react', 'angular', 'vue',
-      'node.js', 'express', 'django', 'flask', 'sql', 'mongodb', 'aws', 'docker',
-      'kubernetes', 'ci/cd', 'git', 'rest', 'graphql', 'html', 'css'
-    ])
-  },
-  soft: {
-    weight: 1.5,
-    keywords: new Set([
-      'leadership', 'communication', 'teamwork', 'problem-solving', 'analytical',
-      'project management', 'time management', 'collaboration', 'adaptability',
-      'creativity', 'critical thinking'
-    ])
-  },
-  industry: {
-    weight: 1.8,
-    keywords: new Set([
-      'agile', 'scrum', 'kanban', 'sdlc', 'testing', 'debugging', 'optimization',
-      'scalability', 'security', 'cloud', 'devops', 'full-stack', 'frontend',
-      'backend', 'mobile', 'web development'
-    ])
-  }
-};
 
 const Index = () => {
   const [resume, setResume] = useState<File>();
@@ -44,6 +16,7 @@ const Index = () => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [matchScore, setMatchScore] = useState<number>();
   const [matchDetails, setMatchDetails] = useState<string[]>([]);
+  const [apiKey, setApiKey] = useState('');
   const { toast } = useToast();
 
   const extractPdfText = async (file: File): Promise<string> => {
@@ -61,93 +34,59 @@ const Index = () => {
     return fullText;
   };
 
-  // Function to extract key terms with categories
-  const extractKeyTerms = (text: string) => {
-    const cleanText = text.toLowerCase().replace(/[^\w\s]/g, ' ');
-    const words = cleanText.split(/\s+/);
-    const terms: { [category: string]: Set<string> } = {
-      technical: new Set(),
-      soft: new Set(),
-      industry: new Set(),
-      other: new Set()
-    };
-
-    words.forEach(word => {
-      if (word.length <= 2) return;
-
-      // Check each category for the word
-      for (const [category, data] of Object.entries(skillCategories)) {
-        if (data.keywords.has(word)) {
-          terms[category].add(word);
-          return;
-        }
-      }
-
-      // Check for fuzzy matches
-      for (const [category, data] of Object.entries(skillCategories)) {
-        for (const keyword of data.keywords) {
-          if (stringSimilarity.compareTwoStrings(word, keyword) > 0.85) {
-            terms[category].add(keyword);
-            return;
-          }
-        }
-      }
-
-      // Add to other if no category match
-      terms.other.add(word);
-    });
-
-    return terms;
-  };
-
-  // Function to calculate weighted match score
-  const calculateMatchScore = (resumeTerms: { [category: string]: Set<string> }, 
-                             jobTerms: { [category: string]: Set<string> }): [number, string[]] => {
-    console.log('Analyzing match between resume and job description...');
+  const analyzeWithGPT = async (resumeText: string, jobText: string) => {
+    console.log('Sending analysis request to OpenAI...');
     
-    let totalScore = 0;
-    let totalWeight = 0;
-    const matchDetails: string[] = [];
-
-    // Calculate score for each category
-    for (const [category, data] of Object.entries(skillCategories)) {
-      const categoryWeight = data.weight;
-      const resumeCategoryTerms = Array.from(resumeTerms[category]);
-      const jobCategoryTerms = Array.from(jobTerms[category]);
-
-      let categoryMatches = 0;
-      const matchedTerms: string[] = [];
-
-      jobCategoryTerms.forEach(jobTerm => {
-        const bestMatch = resumeCategoryTerms.find(resumeTerm => 
-          stringSimilarity.compareTwoStrings(jobTerm, resumeTerm) > 0.85
-        );
-        if (bestMatch) {
-          categoryMatches++;
-          matchedTerms.push(jobTerm);
-        }
+    try {
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: 'gpt-4',
+          messages: [
+            {
+              role: 'system',
+              content: 'You are an expert recruiter analyzing resume matches. Provide a match percentage and detailed analysis.'
+            },
+            {
+              role: 'user',
+              content: `Please analyze this resume against the job description. 
+                       Provide a match percentage and list specific matching skills and qualifications.
+                       Resume: ${resumeText}
+                       Job Description: ${jobText}`
+            }
+          ],
+          temperature: 0.7,
+          max_tokens: 1000
+        })
       });
 
-      if (jobCategoryTerms.length > 0) {
-        const categoryScore = (categoryMatches / jobCategoryTerms.length) * categoryWeight;
-        totalScore += categoryScore;
-        totalWeight += categoryWeight;
-
-        if (matchedTerms.length > 0) {
-          matchDetails.push(`${category.charAt(0).toUpperCase() + category.slice(1)} skills matched: ${matchedTerms.join(', ')}`);
-        }
+      if (!response.ok) {
+        throw new Error('Failed to get analysis from OpenAI');
       }
+
+      const result = await response.json();
+      console.log('OpenAI response:', result);
+
+      // Extract percentage from the response
+      const content = result.choices[0].message.content;
+      const percentageMatch = content.match(/(\d+)%/);
+      const score = percentageMatch ? parseInt(percentageMatch[1]) : 50;
+
+      // Extract key points as match details
+      const details = content
+        .split('\n')
+        .filter(line => line.trim().length > 0)
+        .map(line => line.trim());
+
+      return { score, details };
+    } catch (error) {
+      console.error('OpenAI analysis error:', error);
+      throw error;
     }
-
-    // Calculate final weighted score
-    const finalScore = totalWeight > 0 
-      ? Math.min(100, Math.max(40, Math.round((totalScore / totalWeight) * 100)))
-      : 40;
-
-    console.log('Category matches:', matchDetails);
-    console.log('Final score:', finalScore);
-
-    return [finalScore, matchDetails];
   };
 
   const analyzeMatch = async () => {
@@ -160,6 +99,15 @@ const Index = () => {
       return;
     }
 
+    if (!apiKey) {
+      toast({
+        title: "Missing API Key",
+        description: "Please enter your OpenAI API key",
+        variant: "destructive",
+      });
+      return;
+    }
+
     setIsAnalyzing(true);
     try {
       const resumeText = await extractPdfText(resume);
@@ -167,18 +115,13 @@ const Index = () => {
       const jdResult = await mammoth.extractRawText({ arrayBuffer: jdBuffer });
       const jdText = jdResult.value;
 
-      const resumeTerms = extractKeyTerms(resumeText);
-      const jobTerms = extractKeyTerms(jdText);
-
-      const [score, details] = calculateMatchScore(resumeTerms, jobTerms);
-      setMatchScore(score);
-      setMatchDetails(details);
+      const analysis = await analyzeWithGPT(resumeText, jdText);
+      setMatchScore(analysis.score);
+      setMatchDetails(analysis.details);
       
       console.log('Analysis complete:', {
-        resumeTerms,
-        jobTerms,
-        score,
-        details
+        score: analysis.score,
+        details: analysis.details
       });
 
     } catch (error) {
@@ -201,6 +144,22 @@ const Index = () => {
           <p className="text-lg text-gray-500">
             Upload a resume and job description to see how well they match
           </p>
+        </div>
+
+        <div className="space-y-4">
+          <div className="space-y-2">
+            <label htmlFor="apiKey" className="text-sm font-medium text-gray-700">
+              OpenAI API Key
+            </label>
+            <Input
+              id="apiKey"
+              type="password"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              placeholder="Enter your OpenAI API key"
+              className="w-full"
+            />
+          </div>
         </div>
 
         <div className="grid gap-8 md:grid-cols-2">
@@ -233,7 +192,7 @@ const Index = () => {
           <Button
             size="lg"
             onClick={analyzeMatch}
-            disabled={!resume || !jobDescription || isAnalyzing}
+            disabled={!resume || !jobDescription || !apiKey || isAnalyzing}
           >
             {isAnalyzing ? "Analyzing..." : "Analyze Match"}
           </Button>
