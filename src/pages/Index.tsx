@@ -5,15 +5,45 @@ import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
 import * as pdfjsLib from 'pdfjs-dist';
 import mammoth from 'mammoth';
+import stringSimilarity from 'string-similarity';
 
 // Initialize PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
+
+// Define skill categories with weights
+const skillCategories = {
+  technical: {
+    weight: 2.0,
+    keywords: new Set([
+      'python', 'javascript', 'typescript', 'java', 'c++', 'react', 'angular', 'vue',
+      'node.js', 'express', 'django', 'flask', 'sql', 'mongodb', 'aws', 'docker',
+      'kubernetes', 'ci/cd', 'git', 'rest', 'graphql', 'html', 'css'
+    ])
+  },
+  soft: {
+    weight: 1.5,
+    keywords: new Set([
+      'leadership', 'communication', 'teamwork', 'problem-solving', 'analytical',
+      'project management', 'time management', 'collaboration', 'adaptability',
+      'creativity', 'critical thinking'
+    ])
+  },
+  industry: {
+    weight: 1.8,
+    keywords: new Set([
+      'agile', 'scrum', 'kanban', 'sdlc', 'testing', 'debugging', 'optimization',
+      'scalability', 'security', 'cloud', 'devops', 'full-stack', 'frontend',
+      'backend', 'mobile', 'web development'
+    ])
+  }
+};
 
 const Index = () => {
   const [resume, setResume] = useState<File>();
   const [jobDescription, setJobDescription] = useState<File>();
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [matchScore, setMatchScore] = useState<number>();
+  const [matchDetails, setMatchDetails] = useState<string[]>([]);
   const { toast } = useToast();
 
   const extractPdfText = async (file: File): Promise<string> => {
@@ -31,40 +61,93 @@ const Index = () => {
     return fullText;
   };
 
-  // Function to extract key terms from text
-  const extractKeyTerms = (text: string): string[] => {
-    // Convert to lowercase and remove special characters
+  // Function to extract key terms with categories
+  const extractKeyTerms = (text: string) => {
     const cleanText = text.toLowerCase().replace(/[^\w\s]/g, ' ');
-    
-    // Split into words and remove common words
-    const commonWords = new Set(['and', 'or', 'the', 'a', 'an', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by']);
-    const words = cleanText.split(/\s+/).filter(word => 
-      word.length > 2 && !commonWords.has(word)
-    );
-    
-    return Array.from(new Set(words)); // Remove duplicates
+    const words = cleanText.split(/\s+/);
+    const terms: { [category: string]: Set<string> } = {
+      technical: new Set(),
+      soft: new Set(),
+      industry: new Set(),
+      other: new Set()
+    };
+
+    words.forEach(word => {
+      if (word.length <= 2) return;
+
+      // Check each category for the word
+      for (const [category, data] of Object.entries(skillCategories)) {
+        if (data.keywords.has(word)) {
+          terms[category].add(word);
+          return;
+        }
+      }
+
+      // Check for fuzzy matches
+      for (const [category, data] of Object.entries(skillCategories)) {
+        for (const keyword of data.keywords) {
+          if (stringSimilarity.compareTwoStrings(word, keyword) > 0.85) {
+            terms[category].add(keyword);
+            return;
+          }
+        }
+      }
+
+      // Add to other if no category match
+      terms.other.add(word);
+    });
+
+    return terms;
   };
 
-  // Function to calculate similarity score
-  const calculateMatchScore = (resumeTerms: string[], jobTerms: string[]): number => {
+  // Function to calculate weighted match score
+  const calculateMatchScore = (resumeTerms: { [category: string]: Set<string> }, 
+                             jobTerms: { [category: string]: Set<string> }): [number, string[]] => {
     console.log('Analyzing match between resume and job description...');
-    console.log('Resume terms:', resumeTerms);
-    console.log('Job terms:', jobTerms);
     
-    // Count matching terms
-    const matchingTerms = resumeTerms.filter(term => jobTerms.includes(term));
-    console.log('Matching terms:', matchingTerms);
-    
-    // Calculate basic score based on matching terms
-    const matchRatio = matchingTerms.length / jobTerms.length;
-    
-    // Convert to percentage and ensure minimum score of 40%
-    const baseScore = Math.max(40, Math.min(100, Math.round(matchRatio * 100)));
-    
-    console.log('Match ratio:', matchRatio);
-    console.log('Final score:', baseScore);
-    
-    return baseScore;
+    let totalScore = 0;
+    let totalWeight = 0;
+    const matchDetails: string[] = [];
+
+    // Calculate score for each category
+    for (const [category, data] of Object.entries(skillCategories)) {
+      const categoryWeight = data.weight;
+      const resumeCategoryTerms = Array.from(resumeTerms[category]);
+      const jobCategoryTerms = Array.from(jobTerms[category]);
+
+      let categoryMatches = 0;
+      const matchedTerms: string[] = [];
+
+      jobCategoryTerms.forEach(jobTerm => {
+        const bestMatch = resumeCategoryTerms.find(resumeTerm => 
+          stringSimilarity.compareTwoStrings(jobTerm, resumeTerm) > 0.85
+        );
+        if (bestMatch) {
+          categoryMatches++;
+          matchedTerms.push(jobTerm);
+        }
+      });
+
+      if (jobCategoryTerms.length > 0) {
+        const categoryScore = (categoryMatches / jobCategoryTerms.length) * categoryWeight;
+        totalScore += categoryScore;
+        totalWeight += categoryWeight;
+
+        if (matchedTerms.length > 0) {
+          matchDetails.push(`${category.charAt(0).toUpperCase() + category.slice(1)} skills matched: ${matchedTerms.join(', ')}`);
+        }
+      }
+    }
+
+    // Calculate final weighted score
+    const finalScore = totalWeight > 0 
+      ? Math.min(100, Math.max(40, Math.round((totalScore / totalWeight) * 100)))
+      : 40;
+
+    console.log('Category matches:', matchDetails);
+    console.log('Final score:', finalScore);
+
+    return [finalScore, matchDetails];
   };
 
   const analyzeMatch = async () => {
@@ -79,26 +162,23 @@ const Index = () => {
 
     setIsAnalyzing(true);
     try {
-      // Extract text from PDF resume using PDF.js
       const resumeText = await extractPdfText(resume);
-
-      // Extract text from DOCX job description
       const jdBuffer = await jobDescription.arrayBuffer();
       const jdResult = await mammoth.extractRawText({ arrayBuffer: jdBuffer });
       const jdText = jdResult.value;
 
-      // Extract key terms from both documents
       const resumeTerms = extractKeyTerms(resumeText);
       const jobTerms = extractKeyTerms(jdText);
 
-      // Calculate match score
-      const score = calculateMatchScore(resumeTerms, jobTerms);
+      const [score, details] = calculateMatchScore(resumeTerms, jobTerms);
       setMatchScore(score);
+      setMatchDetails(details);
       
       console.log('Analysis complete:', {
-        resumeLength: resumeText.length,
-        jdLength: jdText.length,
-        score
+        resumeTerms,
+        jobTerms,
+        score,
+        details
       });
 
     } catch (error) {
@@ -160,12 +240,22 @@ const Index = () => {
         </div>
 
         {matchScore !== undefined && (
-          <div className="mt-12">
+          <div className="mt-12 space-y-6">
             <ScoreCard
               score={matchScore}
               title="Match Score"
               description="This score represents how well the resume matches the job description requirements."
             />
+            {matchDetails.length > 0 && (
+              <div className="bg-white p-6 rounded-lg shadow">
+                <h3 className="text-lg font-semibold mb-4">Match Details</h3>
+                <ul className="space-y-2 text-left">
+                  {matchDetails.map((detail, index) => (
+                    <li key={index} className="text-gray-700">{detail}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         )}
       </div>
