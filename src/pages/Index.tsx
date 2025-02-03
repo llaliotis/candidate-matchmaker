@@ -3,8 +3,11 @@ import { FileUpload } from '@/components/FileUpload';
 import { ScoreCard } from '@/components/ScoreCard';
 import { Button } from '@/components/ui/button';
 import { useToast } from '@/components/ui/use-toast';
-import * as pdfParse from 'pdf-parse';
+import * as pdfjsLib from 'pdfjs-dist';
 import mammoth from 'mammoth';
+
+// Initialize PDF.js worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
 const Index = () => {
   const [resume, setResume] = useState<File>();
@@ -12,6 +15,21 @@ const Index = () => {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [matchScore, setMatchScore] = useState<number>();
   const { toast } = useToast();
+
+  const extractPdfText = async (file: File): Promise<string> => {
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    let fullText = '';
+    
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const textContent = await page.getTextContent();
+      const pageText = textContent.items.map((item: any) => item.str).join(' ');
+      fullText += pageText + ' ';
+    }
+    
+    return fullText;
+  };
 
   const analyzeMatch = async () => {
     if (!resume || !jobDescription) {
@@ -25,10 +43,8 @@ const Index = () => {
 
     setIsAnalyzing(true);
     try {
-      // Extract text from PDF resume
-      const resumeBuffer = await resume.arrayBuffer();
-      const resumeData = await pdfParse(new Uint8Array(resumeBuffer));
-      const resumeText = resumeData.text;
+      // Extract text from PDF resume using PDF.js
+      const resumeText = await extractPdfText(resume);
 
       // Extract text from DOCX job description
       const jdBuffer = await jobDescription.arrayBuffer();
