@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { FileUpload } from '@/components/FileUpload';
 import { ScoreCard } from '@/components/ScoreCard';
 import { Button } from '@/components/ui/button';
@@ -6,12 +6,13 @@ import { Input } from '@/components/ui/input';
 import { useToast } from '@/components/ui/use-toast';
 import * as pdfjsLib from 'pdfjs-dist';
 import mammoth from 'mammoth';
+import { Download } from 'lucide-react';
+import { jsPDF } from "jspdf";
+import 'jspdf-autotable';
 
 // Initialize PDF.js worker with a specific version
-const PDFJS_VERSION = '3.11.174';  // Using a known version from CDN
+const PDFJS_VERSION = '3.11.174';
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VERSION}/pdf.worker.min.js`;
-
-// Your existing component code remains the same...
 
 const Index = () => {
   const [resume, setResume] = useState<File>();
@@ -21,6 +22,16 @@ const Index = () => {
   const [matchDetails, setMatchDetails] = useState<string[]>([]);
   const [apiKey, setApiKey] = useState('');
   const { toast } = useToast();
+  const resultsRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (matchScore !== undefined && resultsRef.current) {
+      resultsRef.current.scrollIntoView({ 
+        behavior: 'smooth',
+        block: 'start'
+      });
+    }
+  }, [matchScore]);
 
   const extractPdfText = async (file: File): Promise<string> => {
     const arrayBuffer = await file.arrayBuffer();
@@ -139,6 +150,55 @@ const Index = () => {
     }
   };
 
+  const generatePdfReport = () => {
+    if (matchScore === undefined || matchDetails.length === 0) {
+      toast({
+        title: "No analysis results",
+        description: "Please analyze the documents first",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const doc = new jsPDF();
+    const pageWidth = doc.internal.pageSize.getWidth();
+    
+    // Add title
+    doc.setFontSize(20);
+    doc.text('Resume Match Analysis Report', pageWidth / 2, 20, { align: 'center' });
+    
+    // Add date
+    doc.setFontSize(12);
+    doc.text(`Generated on: ${new Date().toLocaleDateString()}`, pageWidth / 2, 30, { align: 'center' });
+    
+    // Add match score
+    doc.setFontSize(16);
+    doc.text('Match Score:', 20, 50);
+    doc.setFont(undefined, 'bold');
+    doc.text(`${matchScore}%`, 80, 50);
+    doc.setFont(undefined, 'normal');
+    
+    // Add match details
+    doc.setFontSize(16);
+    doc.text('Match Details:', 20, 70);
+    doc.setFontSize(12);
+    
+    const splitDetails = doc.splitTextToSize(matchDetails.join('\n\n'), pageWidth - 40);
+    doc.text(splitDetails, 20, 80);
+    
+    // Generate filename with timestamp
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const filename = `resume-match-analysis-${timestamp}.pdf`;
+    
+    // Save the PDF
+    doc.save(filename);
+    
+    toast({
+      title: "Report downloaded",
+      description: "Your analysis report has been saved as a PDF",
+    });
+  };
+
   return (
     <div className="min-h-screen p-8 max-w-4xl mx-auto">
       <div className="space-y-8">
@@ -202,7 +262,19 @@ const Index = () => {
         </div>
 
         {matchScore !== undefined && (
-          <div className="mt-12 space-y-6">
+          <div ref={resultsRef} className="mt-12 space-y-6">
+            <div className="flex justify-between items-center">
+              <h2 className="text-2xl font-bold">Analysis Results</h2>
+              <Button
+                onClick={generatePdfReport}
+                variant="outline"
+                className="flex items-center gap-2"
+              >
+                <Download className="w-4 h-4" />
+                Download Report
+              </Button>
+            </div>
+            
             <ScoreCard
               score={matchScore}
               title="Match Score"
