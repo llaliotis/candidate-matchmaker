@@ -10,7 +10,7 @@ import { Download } from 'lucide-react';
 import { jsPDF } from "jspdf";
 import 'jspdf-autotable';
 
-// Initialize PDF.js worker with a specific version  
+// Initialize PDF.js worker with a specific version
 const PDFJS_VERSION = '3.11.174';
 pdfjsLib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_VERSION}/pdf.worker.min.js`;
 
